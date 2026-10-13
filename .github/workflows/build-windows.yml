@@ -1,0 +1,44 @@
+name: Build FilmOutech (Windows x64)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      # Static CRT: the installed app needs no Visual C++ redistributable.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target $env:TARGET
+          rustup default stable
+
+      - name: Build
+        run: cargo build --release --locked -p filmcraft -p filmcraft-cli --target $env:TARGET
+
+      - name: Installer (Inno Setup)
+        run: |
+          choco install innosetup -y --no-progress
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "/DBinDir=$env:GITHUB_WORKSPACE\target\$env:TARGET\release" packaging\windows\outech\filmoutech.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: filmoutech-windows-x64
+          path: |
+            dist/release/filmoutech-*-setup.exe
+            target/${{ env.TARGET }}/release/filmoutech.exe
+            target/${{ env.TARGET }}/release/filmoutech-cli.exe
+          if-no-files-found: error
